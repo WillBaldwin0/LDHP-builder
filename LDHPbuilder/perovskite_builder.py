@@ -1,6 +1,7 @@
 from .molecule_utils import *
 import numpy as np
 from anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
+from ase.atoms import Atoms
 
 
 class OrganicMolecule:
@@ -89,6 +90,47 @@ class InorganicMonolayer:
         self.lead_positions = monolayer_ats.get_positions()[syms == 'Pb']
         self.atoms.cell[self.two_d_direction] *= 3.0
         self.layer_charge = -2 * self.lead_positions.shape[0]
+
+    @classmethod
+    def from_species_specification(cls, B_site, X_site, num_unit_cell_octahedra):
+        assert B_site == 'Pb'
+        assert num_unit_cell_octahedra in [1,2,4] # for now...
+        typical_distances = {
+            ('Pb', 'I') : 3.2,
+            ('Pb', 'Br') : 3.0,
+            ('Pb', 'Cl') : 2.85
+        }
+        dist = typical_distances[(B_site, X_site)] * (2**0.5)
+        print(dist)
+        height = dist*4.0/(2**0.5)
+        print(height)
+        unit_cell_dims = {1:(1,1), 2:(1,2), 4:(2,2)}[num_unit_cell_octahedra]
+        cell_options = {
+            1: np.array([[dist, dist, 0.],[dist, -dist, 0.],[0.,0.,height]]),
+            2: np.array([[2*dist, 0., 0.],[0., 2*dist, 0.],[0.,0.,height]]),
+            4: np.array([[2*dist, 2*dist, 0.],[2*dist, -2*dist, 0.],[0.,0.,height]])
+        }
+        cell = cell_options[num_unit_cell_octahedra]
+        species = []
+        positions = []
+        for index_a in range(unit_cell_dims[0]):
+            for index_b in range(unit_cell_dims[1]):
+                species.append(B_site)
+                positions.append([dist*(index_a + index_b), dist*(index_a - index_b), 0.0])
+        for index_a in range(unit_cell_dims[0]):
+            for index_b in range(unit_cell_dims[1]):
+                species += [X_site]*4
+                positions += [
+                    [dist*(index_a + index_b) + dist/2, dist*(index_a - index_b) + dist/2, 0.0],
+                    [dist*(index_a + index_b) + dist/2, dist*(index_a - index_b) - dist/2, 0.0],
+                    [dist*(index_a + index_b), dist*(index_a - index_b), +dist/2**0.5],
+                    [dist*(index_a + index_b), dist*(index_a - index_b), -dist/2**0.5]
+                ]
+        print(cell)
+        monolayer = Atoms(symbols=species, positions=positions, cell=cell)
+        ase.io.write('monolayer.xyz', monolayer)
+        return cls(monolayer)
+
 
     def get_bonding_points(self, normal_displacement=3.5):
         """ returns the coordinates of the points in between the octahedra, displaced by 
@@ -195,9 +237,6 @@ class PerovskiteBuilder:
                 if check_molecule_intersection(ats, num_molecules):
                     perovskite_structures.append(ats)
                     inner_counter = 10
-                    if np.array_equal(molecule_bonding_points, np.array([True, False, True, False])) and np.array_equal(reflections[1], np.array([False, False])) and np.array_equal(reflections[3], np.array([True, False])):
-                        print(len(perovskite_structures))
-                        ase.io.write('debug.xyz', ats, append=True)
                 else:
                     inner_counter += 1
 
