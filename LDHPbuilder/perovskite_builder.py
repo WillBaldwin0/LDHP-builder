@@ -127,7 +127,7 @@ class InorganicMonolayer:
                     [dist*(index_a + index_b), dist*(index_a - index_b), -dist/2**0.5]
                 ]
         print(cell)
-        monolayer = Atoms(symbols=species, positions=positions, cell=cell)
+        monolayer = Atoms(symbols=species, positions=positions, cell=cell, pbc=[True, True, True])
         ase.io.write('monolayer.xyz', monolayer)
         return cls(monolayer)
 
