@@ -1,6 +1,6 @@
 from .molecule_utils import *
 import numpy as np
-from anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
+from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 from ase.atoms import Atoms
 
 
@@ -194,6 +194,7 @@ class PerovskiteBuilder:
         self,
         num_samples=1, 
         max_num_attempts=500,
+        apply_shear=False,
         try_squash=False
     ):
         num_layers = 1
@@ -232,7 +233,8 @@ class PerovskiteBuilder:
                     molecule_bonding_points,
                     1,
                     0,
-                    reflections
+                    reflections,
+                    apply_shear
                 )
                 if check_molecule_intersection(ats, num_molecules):
                     perovskite_structures.append(ats)
@@ -262,7 +264,8 @@ class PerovskiteBuilder:
         molecule_bonding_points,
         num_layers, 
         layer_shifts,
-        molecule_refections
+        molecule_refections,
+        apply_shear,
     ):
         """
         mol_vector: vector align molecule along
@@ -287,6 +290,17 @@ class PerovskiteBuilder:
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
             atoms.extend(mol_cp)
 
+        print('in pb')
+        print(atoms.get_cell()[:])
+
+        if apply_shear:
+            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
+            cell = atoms.get_cell()[:]
+            added_vector = cell[periodic_directions].transpose() @ np.random.randn((2))
+            cell[self.layer.two_d_direction] += added_vector
+            atoms.set_cell(cell)
+        
+        print(atoms.get_cell())
         atoms.center(vacuum=1.5, axis=[self.layer.two_d_direction])
         return atoms
 
@@ -299,7 +313,8 @@ class PerovskiteBuilder:
         molecule_bonding_points,
         num_layers, 
         layer_shifts,
-        molecule_refections # list of lists. for each molecule, for each ps_direction, True if reflect, False if not. 
+        molecule_refections, # list of lists. for each molecule, for each ps_direction, True if reflect, False if not. 
+        apply_shear
     ):
         atoms = deepcopy(self.layer.atoms)
 
@@ -336,6 +351,16 @@ class PerovskiteBuilder:
                     refect_molecule(mol_cp, normal)
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
             atoms.extend(mol_cp)
+        
+        print(atoms.get_cell())
+        if apply_shear:
+            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
+            cell = atoms.get_cell()
+            added_vector = cell[periodic_directions].transpose() @ np.random.randn((2))
+            cell[self.layer.two_d_direction] += added_vector
+            atoms.set_cell(cell)
+        print(atoms.get_cell())
+        assert 0
 
         return atoms
     

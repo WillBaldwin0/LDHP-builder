@@ -1,5 +1,5 @@
 import ase.io
-from anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
+from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 import numpy as np
 from copy import deepcopy
 from scipy.spatial.transform import Rotation as R
