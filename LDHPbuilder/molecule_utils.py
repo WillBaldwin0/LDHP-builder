@@ -69,6 +69,17 @@ def get_mol_to_inorganic_intersections(ats):
     return len(mols_split)
 
 
+def check_mol_to_inorganic_intersections(ats):
+    find_molecs([ats], cutoffs_cross_connections)
+    mols_split = split_molecs([ats])
+    syms_list = [set(mol.get_chemical_symbols()) for mol in mols_split]
+    for mol in syms_list:
+        has_halide = ('Cl' in mol) or ('Br' in mol) or ('I' in mol)
+        if has_halide and 'C' in mol:
+            return False
+    return True
+
+
 def furtherst_heavy_atom_indices(molecule):
     """
     finds the two most distant heavy atoms in a molecule

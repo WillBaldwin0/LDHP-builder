@@ -236,7 +236,7 @@ class PerovskiteBuilder:
                     reflections,
                     apply_shear
                 )
-                if check_molecule_intersection(ats, num_molecules):
+                if check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
                     perovskite_structures.append(ats)
                     inner_counter = 10
                 else:
@@ -290,17 +290,15 @@ class PerovskiteBuilder:
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
             atoms.extend(mol_cp)
 
-        print('in pb')
-        print(atoms.get_cell()[:])
-
         if apply_shear:
             periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
             cell = atoms.get_cell()[:]
-            added_vector = cell[periodic_directions].transpose() @ np.random.randn((2))
+            rand_vec = np.random.randn((2))
+            rand_vec = np.clip(rand_vec, -1.25, 1.25)
+            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
             cell[self.layer.two_d_direction] += added_vector
             atoms.set_cell(cell)
         
-        print(atoms.get_cell())
         atoms.center(vacuum=1.5, axis=[self.layer.two_d_direction])
         return atoms
 
@@ -352,15 +350,14 @@ class PerovskiteBuilder:
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
             atoms.extend(mol_cp)
         
-        print(atoms.get_cell())
         if apply_shear:
             periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
             cell = atoms.get_cell()
-            added_vector = cell[periodic_directions].transpose() @ np.random.randn((2))
+            rand_vec = np.random.randn((2))
+            rand_vec = np.clip(rand_vec, -1.25, 1.25)
+            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
             cell[self.layer.two_d_direction] += added_vector
             atoms.set_cell(cell)
-        print(atoms.get_cell())
-        assert 0
 
         return atoms
     
