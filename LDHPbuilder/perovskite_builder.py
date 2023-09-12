@@ -101,9 +101,7 @@ class InorganicMonolayer:
             ('Pb', 'Cl') : 2.85
         }
         dist = typical_distances[(B_site, X_site)] * (2**0.5)
-        print(dist)
         height = dist*4.0/(2**0.5)
-        print(height)
         unit_cell_dims = {1:(1,1), 2:(1,2), 4:(2,2)}[num_unit_cell_octahedra]
         cell_options = {
             1: np.array([[dist, dist, 0.],[dist, -dist, 0.],[0.,0.,height]]),
@@ -126,7 +124,6 @@ class InorganicMonolayer:
                     [dist*(index_a + index_b), dist*(index_a - index_b), +dist/2**0.5],
                     [dist*(index_a + index_b), dist*(index_a - index_b), -dist/2**0.5]
                 ]
-        print(cell)
         monolayer = Atoms(symbols=species, positions=positions, cell=cell, pbc=[True, True, True])
         ase.io.write('monolayer.xyz', monolayer)
         return cls(monolayer)
@@ -275,6 +272,13 @@ class PerovskiteBuilder:
         layer_shifts: list of vectors, one for each additional layer
         molecule_refections: list of lists. list j contains the sequence of relfections to be applied to molecule j
         """
+        # get final rotation matrix
+        if np.random.choice([True, False]):
+            rr = R.from_rotvec(np.pi/4 * self.layer.fitted_normal / np.linalg.norm(self.layer.fitted_normal))
+            mat = rr.as_matrix()
+        else:
+            mat = np.eye(3)
+
         atoms = deepcopy(self.layer.atoms)
         for (layer_bp, mol_bp, reflection) in zip(
             top_layer_bonding_points, 
@@ -287,6 +291,7 @@ class PerovskiteBuilder:
                 if reflection[i]:
                     normal = self.layer.ps_lattice_constants[i]
                     refect_molecule(mol_cp, normal)
+            rotate_molecule(mol_cp, mat)
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
             atoms.extend(mol_cp)
 
@@ -316,6 +321,13 @@ class PerovskiteBuilder:
     ):
         atoms = deepcopy(self.layer.atoms)
 
+        # get final rotation matrix
+        if np.random.choice([True, False]):
+            rr = R.from_rotvec(np.pi/4 * self.layer.fitted_normal / np.linalg.norm(self.layer.fitted_normal))
+            mat = rr.as_matrix()
+        else:
+            mat = np.eye(3)
+
         for (layer_bp, mol_bp, reflection) in zip(
             top_layer_bonding_points, 
             molecule_bonding_points[:len(top_layer_bonding_points)], 
@@ -327,6 +339,7 @@ class PerovskiteBuilder:
                 if reflection[i]:
                     normal = self.layer.ps_lattice_constants[i]
                     refect_molecule(mol_cp, normal)
+                    rotate_molecule(mol_cp, mat)
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
             atoms.extend(mol_cp)
         
@@ -334,7 +347,6 @@ class PerovskiteBuilder:
         atoms.center(vacuum=1.8, axis=[self.layer.two_d_direction])
         disp = np.zeros(3)
         disp[self.layer.two_d_direction] = atoms.get_positions()[0,self.layer.two_d_direction] - pre_center
-        
 
         for (layer_bp, mol_bp, reflection) in zip(
             bottom_layer_bonding_points, 
@@ -347,6 +359,7 @@ class PerovskiteBuilder:
                 if reflection[i]:
                     normal = self.layer.ps_lattice_constants[i]
                     refect_molecule(mol_cp, normal)
+                    rotate_molecule(mol_cp, mat)
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
             atoms.extend(mol_cp)
         
