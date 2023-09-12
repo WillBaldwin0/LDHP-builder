@@ -93,8 +93,10 @@ def furtherst_heavy_atom_indices(molecule):
     
     components = (positions - np.mean(positions, axis=0)) @ vector
     components[np.logical_not(heavy_atom_mask)] = 0.0
+    indices = (np.argmin(components), np.argmax(components))
+    vector = positions[indices[0]] - positions[indices[1]]
 
-    return (np.argmin(components), np.argmax(components)), vector
+    return indices, vector
 
 
 def fix_to_only_nitrogens(molecule, bp_indices):
