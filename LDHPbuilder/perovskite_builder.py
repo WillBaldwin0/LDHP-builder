@@ -529,6 +529,9 @@ class NewPerovskiteBuilder:
         _mol_obj = OrganicMolecule(_mol, 2)
         reflection_basis = _mol_obj.directed_coordinate_system
 
+        axial_rotation = np.random.uniform(low=0., high=2*np.pi)
+        axial_rotation_matrix = R.from_rotvec(axial_rotation * reflection_basis[0]).as_matrix()
+
         #print(mol_vector)
         #print(reflection_basis)
         #molecule_refections = [[False, False], [False, False]]
@@ -541,10 +544,12 @@ class NewPerovskiteBuilder:
         ):
             mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector, self.layer.ps_lattice_constants[0])
             mol_cp = deepcopy(mol)
+            rotate_molecule(mol_cp, axial_rotation_matrix)
             for i in range(2):
                 if reflection[i]:
                     normal = reflection_basis[i+1]
                     refect_molecule(mol_cp, normal)
+            
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
             atoms.extend(mol_cp)
 
@@ -578,6 +583,9 @@ class NewPerovskiteBuilder:
         _mol_obj = OrganicMolecule(_mol, 2)
         reflection_basis = _mol_obj.directed_coordinate_system
 
+        axial_rotation = np.random.uniform(low=0., high=2*np.pi)
+        axial_rotation_matrix = R.from_rotvec(axial_rotation * reflection_basis[0]).as_matrix()
+
         for (layer_bp, mol_bp, reflection) in zip(
             top_layer_bonding_points, 
             molecule_bonding_points[:len(top_layer_bonding_points)], 
@@ -585,6 +593,7 @@ class NewPerovskiteBuilder:
         ):
             mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector, self.layer.ps_lattice_constants[0])
             mol_cp = deepcopy(mol)
+            rotate_molecule(mol_cp, axial_rotation_matrix)
             for i in range(2):
                 if reflection[i]:
                     normal = reflection_basis[i+1]
@@ -604,6 +613,7 @@ class NewPerovskiteBuilder:
         ):
             mol = self.molecule.get_atoms_shifted_rotated(mol_bp, -mol_vector, -self.layer.ps_lattice_constants[0])
             mol_cp = deepcopy(mol)
+            rotate_molecule(mol_cp, axial_rotation_matrix)
             for i in range(2):
                 if reflection[i]:
                     normal = reflection_basis[i+1]
