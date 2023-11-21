@@ -7,7 +7,8 @@ import warnings
 from ase.neighborlist import neighbor_list, natural_cutoffs
 import itertools
 
-
+import warnings
+warnings.filterwarnings("ignore", message="Optimal rotation is not uniquely or poorly defined for the given sets of vectors.")
 
 # for anaAtoms
 cutoffs_split_inorg = {'Pb': 0.1, 'I': 0.1, 'Br': 0.1, 'Cl': 0.1, 'H':0.5, 'C':1, 'N':1},

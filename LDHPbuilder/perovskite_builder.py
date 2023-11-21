@@ -2,6 +2,7 @@ from .molecule_utils import *
 import numpy as np
 from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 from ase.atoms import Atoms
+from typing import List
 
 
 class OrganicMolecule:
@@ -25,7 +26,6 @@ class OrganicMolecule:
         else:
             self.number_of_bonding_points = 2
 
-
         # coorindate axes for rotations
         #self.coordinate_system = principle_axes_of_molecule(ats)
         #if np.dot(self.long_vector, self.coordinate_system[0]) < 0.0:
@@ -45,7 +45,13 @@ class OrganicMolecule:
         self.coordinate_system /= np.linalg.norm(self.coordinate_system, axis=1)[:,None]
         self.directed_coordinate_system = self.coordinate_system
 
-    def get_atoms_shifted_rotated(self, bonding_index, vector, reference_vector):
+    def get_atoms_shifted_rotated(
+        self, 
+        bonding_index, 
+        vector, 
+        reference_vector, 
+        return_rotation_matrix=False
+    ):
         """ return the molecule, with bonding atom shifted to the origin, 
         and the molecule long axis aligned along vector """
         
@@ -67,7 +73,10 @@ class OrganicMolecule:
         #print("matrix = ", txx[0].as_matrix())
         mat = directed_coordinate_system.transpose() @ target_coordinate_system
         rotate_molecule(new_ats, mat)
-        return new_ats
+        if return_rotation_matrix:
+            return new_ats, mat
+        else:
+            return new_ats
             
     def _rotation_matrix_onto_new_coords(self, new_coords):
         # this matrix left multiples column vectors
@@ -174,7 +183,6 @@ class InorganicMonolayer:
         string += f"\n {self.atoms.get_chemical_formula()}"
         string += f"\n normal = {self.fitted_normal}, 2d axis is direction {self.two_d_direction}"
         return string
-    
 
 
 class PerovskiteBuilder:
@@ -185,10 +193,8 @@ class PerovskiteBuilder:
     - choosing which part of the molecule goes into the site
     - choosing whether to apply reflections to the molecule
      """
-    def __init__(self, inorganic_layer, molecule):
-        self.layer = inorganic_layer
-        self.molecule = molecule
-        assert (self.layer.lead_positions.shape[0] in [1,2,4,8]) # we only want powers of two please. 
+    def __init__(self):
+        pass
 
     def __repr__(self):
         string = "PerovskiteBuilder:"
@@ -197,6 +203,7 @@ class PerovskiteBuilder:
         return string
     
     def reduced_random_binary_array(self, n): 
+        """ returns a random binary array subject to some symmetry constraints """
         # n must be a power of 2
         assert ((n & (n-1) == 0) and n != 0) # funky
 
@@ -208,452 +215,298 @@ class PerovskiteBuilder:
                 stuff[2**i:] = list(np.logical_not(stuff[2**i:]))
         return np.asarray(stuff)
 
-    def generate_ats(
-        self,
-        num_samples=1, 
-        max_num_attempts=500,
-        apply_shear=False,
-        try_squash=False
-    ):
-        num_layers = 1
 
-        if self.molecule.charge == 1:
-            f = self._generate_guess_charge_1
-        elif self.molecule.charge == 2:
-            f = self._generate_guess_charge_2
+    def generate_homogeneous_perovskite_samples(
+        self,
+        inorganic_layer,
+        organic_molecule,
+        num_samples=1,
+        num_layers=1,
+        max_num_attempts=None,
+        max_attempts_per_symmetry=10,
+        stacking_method='total_thickness'
+    ):
+        if max_num_attempts is None:
+            max_num_attempts = 10 * num_samples
+
+        # get required number of molcules which determines the size of the random state
+        num_leads = inorganic_layer.lead_positions.shape[0]
+        num_mol_per_layer = (2*num_leads) // organic_molecule.charge
+        num_molecules = num_mol_per_layer * num_layers
+
+        # select the correct function for building the molcule
+        if organic_molecule.charge == 1:
+            f = self.generate_homogeneous_layer_charge_1
+        elif organic_molecule.charge == 2:
+            f = self.generate_homogeneous_layer_charge_2
         else:
-            assert 0
-        
-        num_leads = self.layer.lead_positions.shape[0]
-        num_molecules = (2*num_leads) // self.molecule.charge
-        top_layer_bonding_points, bottom_layer_bonding_points = self.layer.get_bonding_points(normal_displacement=4.0)
-        
-        # create exaustive list 
+            raise ValueError('wtf is this molecule')
+
         perovskite_structures = []
         num_attempted_orientations = 0
+        for i in range(max_num_attempts):
+            # The random state is the combination of reflections, bonding points, and rotations
+            # 1. molecule bonding points - this is a choice of either end of the molecule, one for each molecule
+            molecule_reference_point_indices = self.reduced_random_binary_array(num_molecules)
 
-        while (num_attempted_orientations < max_num_attempts) and (len(perovskite_structures) < num_samples):
-
-            molecule_bonding_points = self.reduced_random_binary_array(num_molecules)
-
-            # reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
+            # 2. reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
+            #reflections = np.vstack((
+            #    self.reduced_random_binary_array(num_molecules), 
+            #    self.reduced_random_binary_array(num_molecules))
+            #).transpose()
             reflections = self.reduced_random_binary_array(num_molecules)
             reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
             
-            inner_counter = 0
-            while inner_counter < 10: # try hard for lower symmetry cases
-                molecule_long_vector = random_points_on_cap(45, 1, self.layer.fitted_normal)[0] # molecules share this vector
+            # we want to broadly sample the discrete symmetries, but for low symmetries it takes several attempts to 
+            # get an acceptable structure
+            for inner_counter in range(max_attempts_per_symmetry):
+                # 3. rotations
+                molecule_long_vector = random_points_on_cap(45, 1, inorganic_layer.fitted_normal)[0]
+                axial_rotations = np.random.uniform(low=0., high=2*np.pi)
 
-                ats = f(
-                    molecule_long_vector,
-                    top_layer_bonding_points,
-                    bottom_layer_bonding_points,
-                    molecule_bonding_points,
-                    1,
-                    0,
-                    reflections,
-                    apply_shear
-                )
-                if True: # check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
-                    perovskite_structures.append(ats)
-                    inner_counter = 10
-                else:
-                    inner_counter += 1
-
-            num_attempted_orientations +=1
-
-        if num_attempted_orientations == max_num_attempts:
-            warnings.warn( f"reached max number of attempts having only generated {len(perovskite_structures)} structures." )
-        else:
-            print(f"generated {num_samples} samples after {num_attempted_orientations} attempts")
-
-        if try_squash:
-            for struc in perovskite_structures:
-                self._attempt_to_squash(struc)
-
-        return perovskite_structures
-
-    
-    def _generate_guess_charge_2(
-        self,
-        mol_vector,
-        top_layer_bonding_points,
-        bottom_layer_bonding_points,
-        molecule_bonding_points,
-        num_layers, 
-        layer_shifts,
-        molecule_refections,
-        apply_shear,
-    ):
-        """
-        mol_vector: vector align molecule along
-        layer_bonding_points: list of coordinates to dock on (w.r.t first layer)
-        molecule_bonding_points: list of indices, either 0 or 1
-        num_layers: int
-        layer_shifts: list of vectors, one for each additional layer
-        molecule_refections: list of lists. list j contains the sequence of relfections to be applied to molecule j
-        """
-        # get final rotation matrix
-        if np.random.choice([True, False]):
-            rr = R.from_rotvec(np.pi/4 * self.layer.fitted_normal / np.linalg.norm(self.layer.fitted_normal))
-            mat = rr.as_matrix()
-        else:
-            mat = np.eye(3)
-
-        atoms = deepcopy(self.layer.atoms)
-        for (layer_bp, mol_bp, reflection) in zip(
-            top_layer_bonding_points, 
-            molecule_bonding_points, 
-            molecule_refections
-        ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector)
-            mol_cp = deepcopy(mol)
-            for i in range(2):
-                if reflection[i]:
-                    normal = self.layer.ps_lattice_constants[i]
-                    refect_molecule(mol_cp, normal)
-            rotate_molecule(mol_cp, mat)
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
-            atoms.extend(mol_cp)
-
-        if apply_shear:
-            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
-            cell = atoms.get_cell()[:]
-            rand_vec = np.random.randn((2))
-            rand_vec = np.clip(rand_vec, -1.25, 1.25)
-            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
-            cell[self.layer.two_d_direction] += added_vector
-            atoms.set_cell(cell)
-        
-        atoms.center(vacuum=1.5, axis=[self.layer.two_d_direction])
-        return atoms
-
-
-    def _generate_guess_charge_1(
-        self,
-        mol_vector,
-        top_layer_bonding_points,
-        bottom_layer_bonding_points,
-        molecule_bonding_points,
-        num_layers, 
-        layer_shifts,
-        molecule_refections, # list of lists. for each molecule, for each ps_direction, True if reflect, False if not. 
-        apply_shear
-    ):
-        atoms = deepcopy(self.layer.atoms)
-
-        # get final rotation matrix
-        if np.random.choice([True, False]):
-            rr = R.from_rotvec(np.pi/4 * self.layer.fitted_normal / np.linalg.norm(self.layer.fitted_normal))
-            mat = rr.as_matrix()
-        else:
-            mat = np.eye(3)
-
-        for (layer_bp, mol_bp, reflection) in zip(
-            top_layer_bonding_points, 
-            molecule_bonding_points[:len(top_layer_bonding_points)], 
-            molecule_refections[:len(top_layer_bonding_points)]
-        ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector)
-            mol_cp = deepcopy(mol)
-            for i in range(2):
-                if reflection[i]:
-                    normal = self.layer.ps_lattice_constants[i]
-                    refect_molecule(mol_cp, normal)
-                    rotate_molecule(mol_cp, mat)
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
-            atoms.extend(mol_cp)
-        
-        pre_center = atoms.get_positions()[0,self.layer.two_d_direction]
-        atoms.center(vacuum=1.8, axis=[self.layer.two_d_direction])
-        disp = np.zeros(3)
-        disp[self.layer.two_d_direction] = atoms.get_positions()[0,self.layer.two_d_direction] - pre_center
-
-        for (layer_bp, mol_bp, reflection) in zip(
-            bottom_layer_bonding_points, 
-            molecule_bonding_points[len(top_layer_bonding_points):], 
-            molecule_refections[len(top_layer_bonding_points):]
-        ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, -mol_vector)
-            mol_cp = deepcopy(mol)
-            for i in range(2):
-                if reflection[i]:
-                    normal = self.layer.ps_lattice_constants[i]
-                    refect_molecule(mol_cp, normal)
-                    rotate_molecule(mol_cp, mat)
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
-            atoms.extend(mol_cp)
-        
-        if apply_shear:
-            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
-            cell = atoms.get_cell()
-            rand_vec = np.random.randn((2))
-            rand_vec = np.clip(rand_vec, -1.25, 1.25)
-            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
-            cell[self.layer.two_d_direction] += added_vector
-            atoms.set_cell(cell)
-
-        return atoms
-    
-
-    def _attempt_to_squash(self, perovskite_guess):
-        pg = deepcopy(perovskite_guess) * (2,2,2)
-
-        original_num_entities = get_mol_to_inorganic_intersections(pg)
-        for step in range(1000):
-            if get_mol_to_inorganic_intersections(pg) == original_num_entities:
-                pg.center(vacuum=1.5 - 0.05*step, axis=[self.layer.two_d_direction])
-            else:
-                break
-        if step == 1000:
-            assert 0
-
-        perovskite_guess.center(vacuum=1.5 - 0.05*(step-1), axis=[self.layer.two_d_direction])
-
-        return perovskite_guess
-
-
-
-
-class NewPerovskiteBuilder:
-    """ class for assembling perovskites from molecules and inorganic layers.
-    implementation is currently a collection of ad-hock rules, but gives decent results.
-     
-    the fundamental way in which perovskites are built involves first placing molecules at given sites, 
-    - choosing which part of the molecule goes into the site
-    - choosing whether to apply reflections to the molecule
-     """
-    def __init__(self, inorganic_layer, molecule):
-        self.layer = inorganic_layer
-        self.molecule = molecule
-        assert (self.layer.lead_positions.shape[0] in [1,2,4,8]) # we only want powers of two please. 
-
-    def __repr__(self):
-        string = "PerovskiteBuilder:"
-        string += f"\n inorganic: {self.layer.atoms.get_chemical_formula()}"
-        string += f"\n organic: {self.molecule._atoms.get_chemical_formula()}"
-        return string
-    
-    def reduced_random_binary_array(self, n): 
-        # n must be a power of 2
-        assert ((n & (n-1) == 0) and n != 0) # funky
-
-        exp = int(np.log2(n))
-        stuff = [np.random.choice([True,False])]
-        for i in range(exp):
-            stuff += stuff
-            if np.random.choice([0,1]):
-                stuff[2**i:] = list(np.logical_not(stuff[2**i:]))
-        return np.asarray(stuff)
-
-    def generate_ats(
-        self,
-        num_samples=1, 
-        max_num_attempts=500,
-        apply_shear=False,
-        try_squash=False,
-        num_layers = 1
-    ):
-
-        if self.molecule.charge == 1:
-            f = self._generate_guess_charge_1
-        elif self.molecule.charge == 2:
-            f = self._generate_guess_charge_2
-        else:
-            assert 0
-        
-        num_leads = self.layer.lead_positions.shape[0]
-        num_molecules = (2*num_leads) * num_layers // self.molecule.charge
-        top_layer_bonding_points, bottom_layer_bonding_points = self.layer.get_bonding_points(normal_displacement=4.0)
-        
-        # create exaustive list 
-        perovskite_structures = []
-        num_attempted_orientations = 0
-
-        while (num_attempted_orientations < max_num_attempts) and (len(perovskite_structures) < num_samples):
-
-            molecule_bonding_points = self.reduced_random_binary_array(num_molecules)
-
-            # reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
-            reflections = self.reduced_random_binary_array(num_molecules)
-            reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
-
-            inner_counter = 0
-            while inner_counter < 10: # try hard for lower symmetry cases
-                molecule_long_vector = random_points_on_cap(45, 1, self.layer.fitted_normal)[0] # molecules share this vector
-                ats = f(
-                    molecule_long_vector,
-                    top_layer_bonding_points,
-                    bottom_layer_bonding_points,
-                    molecule_bonding_points[:num_molecules//num_layers],
-                    1,
-                    0,
-                    reflections[:num_molecules//num_layers],
-                    apply_shear
-                )
-                for layer_counter in range(1, num_layers):
-                    # make a new molecule vector
-                    molecule_long_vector = random_points_on_cap(45, 1, self.layer.fitted_normal)[0]
-                    layer = f(
+                # make layers
+                perovskite_layers = []
+                for layer_counter in range(num_layers):
+                    chunk = slice(num_mol_per_layer*layer_counter, num_mol_per_layer*(layer_counter+1))
+                    perovskite_layers.append(f(
+                        inorganic_layer,
+                        organic_molecule,
+                        molecule_reference_point_indices[chunk],
+                        reflections[chunk],
                         molecule_long_vector,
-                        top_layer_bonding_points,
-                        bottom_layer_bonding_points,
-                        molecule_bonding_points[(num_molecules//num_layers)*layer_counter:(num_molecules//num_layers)*(layer_counter+1)],
-                        1,
-                        0,
-                        reflections[(num_molecules//num_layers)*layer_counter:(num_molecules//num_layers)*(layer_counter+1)],
-                        apply_shear
-                    )
-                    layer.set_positions(layer.get_positions() + layer_counter * ats.cell[self.layer.two_d_direction])
-                    ats.extend(layer)
+                        axial_rotations,
+                    ))
 
-                ats.center(vacuum=1.0, axis=[self.layer.two_d_direction])
+                # stack them
+                structure = self.stack_layers(
+                    perovskite_layers,
+                    two_d_direction=inorganic_layer.two_d_direction,
+                    method=stacking_method,
+                )
 
-                if check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
-                    print('success')
-                    perovskite_structures.append(ats)
-                    inner_counter = 10
-                else:
-                    inner_counter += 1
-                    if False:
-                        inner_counter = 10
-                        perovskite_structures.append(ats)
+                # check intersections
+                if check_molecule_intersection(structure, num_molecules) and check_mol_to_inorganic_intersections(structure):
+                    perovskite_structures.append(structure)
+                    break
 
             num_attempted_orientations +=1
+
+            if num_samples == len(perovskite_structures):
+                break
 
         if num_attempted_orientations == max_num_attempts:
             warnings.warn( f"reached max number of attempts having only generated {len(perovskite_structures)} structures." )
         else:
             print(f"generated {num_samples} samples after {num_attempted_orientations} attempts")
-
-        if try_squash:
-            for struc in perovskite_structures:
-                self._attempt_to_squash(struc)
-
+        
         return perovskite_structures
 
-    
-    def _generate_guess_charge_2(
-        self,
-        mol_vector,
-        top_layer_bonding_points,
-        bottom_layer_bonding_points,
-        molecule_bonding_points,
-        num_layers, 
-        layer_shifts,
-        molecule_refections,
-        apply_shear,
+    def stack_layers(
+        self, 
+        layers_objects,
+        two_d_direction,
+        method='total_thickness',
+        apply_shear=True,
+        spacer=1.5
     ):
-        atoms = deepcopy(self.layer.atoms)
-        # get basis for reflections
-        _mol = self.molecule.get_atoms_shifted_rotated(0, mol_vector, self.layer.ps_lattice_constants[0])
-        _mol_obj = OrganicMolecule(_mol, 2)
-        reflection_basis = _mol_obj.directed_coordinate_system
+        """ given a list of layers, stack them together into one atoms object,
+        - method: describes how to set the distance between layers.
+        for now, use total thickness for +2 cations and for +1 cations which are 'short'.
+        use half thickness for +1 cations which are 'long' """
 
-        axial_rotation = np.random.uniform(low=0., high=2*np.pi)
-        axial_rotation_matrix = R.from_rotvec(axial_rotation * reflection_basis[0]).as_matrix()
+        assert method in ['total_thickness', 'half_thickness']
 
-        #print(mol_vector)
-        #print(reflection_basis)
-        #molecule_refections = [[False, False], [False, False]]
-        #molecule_bonding_points = [False, False]
-
-        for (layer_bp, mol_bp, reflection) in zip(
-            top_layer_bonding_points, 
-            molecule_bonding_points, 
-            molecule_refections
-        ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector, self.layer.ps_lattice_constants[0])
-            mol_cp = deepcopy(mol)
-            rotate_molecule(mol_cp, axial_rotation_matrix)
-            for i in range(2):
-                if reflection[i]:
-                    normal = reflection_basis[i+1]
-                    refect_molecule(mol_cp, normal)
+        if method == 'total_thickness':
+            # center each unit 
+            for layer in layers_objects:
+                layer.center(vacuum=spacer, axis=[two_d_direction])
             
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
-            atoms.extend(mol_cp)
+            # then stack them
+            atoms = layers_objects[0]
 
-        if apply_shear:
-            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
-            cell = atoms.get_cell()[:]
-            rand_vec = np.random.randn((2))
-            rand_vec = np.clip(rand_vec, -1.25, 1.25)
-            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
-            cell[self.layer.two_d_direction] += added_vector
-            atoms.set_cell(cell)
+            for i in range(1, len(layers_objects)):
+                displacement = atoms.cell[two_d_direction]
+                if apply_shear:
+                    random_shift = np.random.randn(3) * 5.0
+                    random_shift[two_d_direction] = 0.0
+                    displacement += random_shift
+                layers_objects[i].set_positions(layer.get_positions() + displacement)
+                atoms.extend(layers_objects[i])
+            
+            atoms.center(vacuum=spacer, axis=[two_d_direction])
+        elif method == 'half_thickness':
+            # get the thickness from the bottom of the inorganic layer
+            # and the top of the organic layer.
+            # do this for the layer to be added each time
+
+            # stack
+            atoms = layers_objects[0]
+            for i in range(1, len(layers_objects)):
+                # top of layer i-1
+                top = layers_objects[i-1].get_positions()[:,two_d_direction].max()
+                # bottom of layer i
+                lead_pos = layers_objects[i].get_positions()[np.array(layers_objects[0].get_chemical_symbols()) == 'Pb']
+                bottom = lead_pos[:,two_d_direction].min() - 5.0 - spacer
+                displacement = np.array([0,0,top-bottom])
+
+                if apply_shear:
+                    random_shift = np.random.randn(3) * 5.0
+                    random_shift[two_d_direction] = 0.0
+                    displacement += random_shift
+                
+                layers_objects[i].set_positions(layers_objects[i].get_positions() + displacement)
+                atoms.extend(layers_objects[i])
+
+            # centering
+            top = atoms.get_positions()[:,two_d_direction].max()
+            lead_pos = atoms.get_positions()[np.array(atoms.get_chemical_symbols()) == 'Pb']
+            bottom = lead_pos[:,two_d_direction].min() - 5.0 - spacer
+            atoms.cell[two_d_direction] = np.array([0,0,top-bottom])
         
-        atoms.center(vacuum=1.5, axis=[self.layer.two_d_direction])
         return atoms
 
-
-    def _generate_guess_charge_1(
-        self,
-        mol_vector,
-        top_layer_bonding_points,
-        bottom_layer_bonding_points,
-        molecule_bonding_points,
-        num_layers, 
-        layer_shifts,
-        molecule_refections, # list of lists. for each molecule, for each ps_direction, True if reflect, False if not. 
-        apply_shear
+    def generate_homogeneous_layer_charge_1(
+        self, 
+        inorganic_layer,
+        molecule_object,
+        molecule_reference_point_indices,
+        molecule_reflections,
+        molecule_long_vector,
+        molecule_axial_rotation,
     ):
-        atoms = deepcopy(self.layer.atoms)
-        # get basis for reflections
-        _mol = self.molecule.get_atoms_shifted_rotated(0, mol_vector, self.layer.ps_lattice_constants[0])
-        _mol_obj = OrganicMolecule(_mol, 2)
-        reflection_basis = _mol_obj.directed_coordinate_system
+        """ using the internally stored molecule and inorganic layer, make one perovskite layer. 
+        The layer is homogeneous, meaning that all molecules are the same, and the 'long vector' is also shared."""
 
-        axial_rotation = np.random.uniform(low=0., high=2*np.pi)
-        axial_rotation_matrix = R.from_rotvec(axial_rotation * reflection_basis[0]).as_matrix()
+        top_layer_bonding_points, bottom_layer_bonding_points = inorganic_layer.get_bonding_points(normal_displacement=4.0)
+        num_mols = len(top_layer_bonding_points) * 2
 
+        # check sizes
+        assert molecule_reflections.shape[0] == len(molecule_reference_point_indices) == num_mols
+
+        # initialize atoms object
+        perovskite_obj = deepcopy(inorganic_layer.atoms)
+        perovskite_obj.cell[inorganic_layer.two_d_direction] *= 3.0
+
+        # place molecules on top
         for (layer_bp, mol_bp, reflection) in zip(
             top_layer_bonding_points, 
-            molecule_bonding_points[:len(top_layer_bonding_points)], 
-            molecule_refections[:len(top_layer_bonding_points)]
+            molecule_reference_point_indices[:num_mols//2], 
+            molecule_reflections[:num_mols//2]
         ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, mol_vector, self.layer.ps_lattice_constants[0])
-            mol_cp = deepcopy(mol)
-            rotate_molecule(mol_cp, axial_rotation_matrix)
-            for i in range(2):
-                if reflection[i]:
-                    normal = reflection_basis[i+1]
-                    refect_molecule(mol_cp, normal)
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp)
-            atoms.extend(mol_cp)
+            self.place_molecule(
+                perovskite_obj,
+                inorganic_layer,
+                molecule_object,
+                layer_bp,
+                mol_bp,
+                reflection,
+                molecule_long_vector,
+                molecule_axial_rotation
+            )
         
-        pre_center = atoms.get_positions()[0,self.layer.two_d_direction]
-        atoms.center(vacuum=1.0, axis=[self.layer.two_d_direction])
-        disp = np.zeros(3)
-        disp[self.layer.two_d_direction] = atoms.get_positions()[0,self.layer.two_d_direction] - pre_center
-
+        # place molecules on bottom
         for (layer_bp, mol_bp, reflection) in zip(
             bottom_layer_bonding_points, 
-            molecule_bonding_points[len(top_layer_bonding_points):], 
-            molecule_refections[len(top_layer_bonding_points):]
+            molecule_reference_point_indices[num_mols//2:], 
+            molecule_reflections[num_mols//2:]
         ):
-            mol = self.molecule.get_atoms_shifted_rotated(mol_bp, -mol_vector, -self.layer.ps_lattice_constants[0])
-            mol_cp = deepcopy(mol)
-            rotate_molecule(mol_cp, axial_rotation_matrix)
-            for i in range(2):
-                if reflection[i]:
-                    normal = reflection_basis[i+1]
-                    refect_molecule(mol_cp, normal)
-            mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
-            atoms.extend(mol_cp)
+            self.place_molecule(
+                perovskite_obj,
+                inorganic_layer,
+                molecule_object,
+                layer_bp,
+                mol_bp,
+                reflection,
+                -1. * molecule_long_vector, # flip the vector
+                molecule_axial_rotation
+            )
 
-        atoms.center(vacuum=1.0, axis=[self.layer.two_d_direction])
+        return perovskite_obj
+
+
+    def generate_homogeneous_layer_charge_2(
+        self, 
+        inorganic_layer,
+        molecule_object,
+        molecule_reference_point_indices,
+        molecule_reflections,
+        molecule_long_vector,
+        molecule_axial_rotation,
+    ):
+        """ using the internally stored molecule and inorganic layer, make one perovskite layer. 
+        The layer is homogeneous, meaning that all molecules are the same, and the 'long vector' is also shared."""
+
+        top_layer_bonding_points, bottom_layer_bonding_points = inorganic_layer.get_bonding_points(normal_displacement=4.0)
+        num_mols = len(top_layer_bonding_points)
+
+        # check sizes
+        assert molecule_reflections.shape[0] == len(molecule_reference_point_indices) == num_mols
+
+        # initialize atoms object
+        perovskite_obj = deepcopy(inorganic_layer.atoms)
+        perovskite_obj.cell[inorganic_layer.two_d_direction] *= 3.0
+
+        # place molecules on top
+        for (layer_bp, mol_bp, reflection) in zip(
+            top_layer_bonding_points, 
+            molecule_reference_point_indices, 
+            molecule_reflections
+        ):
+            self.place_molecule(
+                perovskite_obj,
+                inorganic_layer,
+                molecule_object,
+                layer_bp,
+                mol_bp,
+                reflection,
+                molecule_long_vector,
+                molecule_axial_rotation
+            )
+
+        return perovskite_obj
+
+
+    def place_molecule(
+        self,
+        perovskite_atoms: ase.Atoms,
+        layer: InorganicMonolayer,
+        molecule: List[OrganicMolecule],
+        layer_reference_point: np.ndarray,
+        molecule_reference_point_index: int,
+        molecule_reflections: np.ndarray,
+        molecule_long_vector: np.ndarray,
+        molecule_axial_rotation: float,
+    ):
+        """ 
+        Given an incomplete perovskite atoms object, an inorganic layer object, a molecule object, 
+        add the molecule to the incomplete perovskite atoms object. 
+        it is assumed that the perovskite already contains the inorganic layer. 
+        """
+
+        # shift the molecule and align to the 'long vector'
+        mol, mat1 = molecule.get_atoms_shifted_rotated(
+            molecule_reference_point_index, 
+            molecule_long_vector, 
+            layer.ps_lattice_constants[0],
+            return_rotation_matrix=True,
+        )
+        # get the basis for reflections, and the matrix for the axial rotation
+        reflection_basis = molecule.directed_coordinate_system @ mat1
+        axial_rotation_matrix = R.from_rotvec(molecule_axial_rotation * reflection_basis[0]).as_matrix()
+
+        # apply the axial rotation
+        mol_cp = deepcopy(mol)
+        rotate_molecule(mol_cp, axial_rotation_matrix)
+
+        # apply the reflections
+        for i in range(2):
+            if molecule_reflections[i]:
+                normal = reflection_basis[i+1]
+                refect_molecule(mol_cp, normal)
         
-        if apply_shear:
-            periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
-            cell = atoms.get_cell()
-            rand_vec = np.random.randn((2))
-            rand_vec = np.clip(rand_vec, -1.25, 1.25)
-            added_vector = cell[periodic_directions].transpose() @ rand_vec * 0.75
-            cell[self.layer.two_d_direction] += added_vector
-            atoms.set_cell(cell)
-
-        return atoms
+        # shift the molecule to the layer bonding point and add to the perovskite
+        mol_cp.set_positions(mol_cp.get_positions() + layer_reference_point)
+        perovskite_atoms.extend(mol_cp)
     
 
     def _attempt_to_squash(self, perovskite_guess):
