@@ -254,7 +254,7 @@ class PerovskiteBuilder:
                     reflections,
                     apply_shear
                 )
-                if check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
+                if True: # check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
                     perovskite_structures.append(ats)
                     inner_counter = 10
                 else:
@@ -451,9 +451,9 @@ class NewPerovskiteBuilder:
         num_samples=1, 
         max_num_attempts=500,
         apply_shear=False,
-        try_squash=False
-    ):
+        try_squash=False,
         num_layers = 1
+    ):
 
         if self.molecule.charge == 1:
             f = self._generate_guess_charge_1
@@ -463,7 +463,7 @@ class NewPerovskiteBuilder:
             assert 0
         
         num_leads = self.layer.lead_positions.shape[0]
-        num_molecules = (2*num_leads) // self.molecule.charge
+        num_molecules = (2*num_leads) * num_layers // self.molecule.charge
         top_layer_bonding_points, bottom_layer_bonding_points = self.layer.get_bonding_points(normal_displacement=4.0)
         
         # create exaustive list 
@@ -477,26 +477,47 @@ class NewPerovskiteBuilder:
             # reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
             reflections = self.reduced_random_binary_array(num_molecules)
             reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
-            
+
             inner_counter = 0
             while inner_counter < 10: # try hard for lower symmetry cases
                 molecule_long_vector = random_points_on_cap(45, 1, self.layer.fitted_normal)[0] # molecules share this vector
-
                 ats = f(
                     molecule_long_vector,
                     top_layer_bonding_points,
                     bottom_layer_bonding_points,
-                    molecule_bonding_points,
+                    molecule_bonding_points[:num_molecules//num_layers],
                     1,
                     0,
-                    reflections,
+                    reflections[:num_molecules//num_layers],
                     apply_shear
                 )
+                for layer_counter in range(1, num_layers):
+                    # make a new molecule vector
+                    molecule_long_vector = random_points_on_cap(45, 1, self.layer.fitted_normal)[0]
+                    layer = f(
+                        molecule_long_vector,
+                        top_layer_bonding_points,
+                        bottom_layer_bonding_points,
+                        molecule_bonding_points[(num_molecules//num_layers)*layer_counter:(num_molecules//num_layers)*(layer_counter+1)],
+                        1,
+                        0,
+                        reflections[(num_molecules//num_layers)*layer_counter:(num_molecules//num_layers)*(layer_counter+1)],
+                        apply_shear
+                    )
+                    layer.set_positions(layer.get_positions() + layer_counter * ats.cell[self.layer.two_d_direction])
+                    ats.extend(layer)
+
+                ats.center(vacuum=1.0, axis=[self.layer.two_d_direction])
+
                 if check_molecule_intersection(ats, num_molecules) and check_mol_to_inorganic_intersections(ats):
+                    print('success')
                     perovskite_structures.append(ats)
                     inner_counter = 10
                 else:
                     inner_counter += 1
+                    if False:
+                        inner_counter = 10
+                        perovskite_structures.append(ats)
 
             num_attempted_orientations +=1
 
@@ -602,7 +623,7 @@ class NewPerovskiteBuilder:
             atoms.extend(mol_cp)
         
         pre_center = atoms.get_positions()[0,self.layer.two_d_direction]
-        atoms.center(vacuum=1.8, axis=[self.layer.two_d_direction])
+        atoms.center(vacuum=1.0, axis=[self.layer.two_d_direction])
         disp = np.zeros(3)
         disp[self.layer.two_d_direction] = atoms.get_positions()[0,self.layer.two_d_direction] - pre_center
 
@@ -620,6 +641,8 @@ class NewPerovskiteBuilder:
                     refect_molecule(mol_cp, normal)
             mol_cp.set_positions(mol_cp.get_positions() + layer_bp + disp)
             atoms.extend(mol_cp)
+
+        atoms.center(vacuum=1.0, axis=[self.layer.two_d_direction])
         
         if apply_shear:
             periodic_directions = np.array(list(set([0,1,2]) - set([self.layer.two_d_direction])))
