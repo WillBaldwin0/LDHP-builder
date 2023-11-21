@@ -11,9 +11,9 @@ First create an inorganic monolayer
 ```python
 from LDHPbuilder.perovskite_builder import OrganicMolecule, InorganicMonolayer, PerovskiteBuilder
 
-monolayer = InorganicMonolayer.from_species_specification('Pb', 'Br', layer_size=2)
+monolayer = InorganicMonolayer.from_species_specification('Pb', 'Br', num_unit_cell_octahedra=2)
 ```
-`layer_size` is the number of lead atoms in each monolayer, in each unit cell. The `InorganicMonolayer` computes some useful properties when given an atoms object representing a monolayer. It also provides the useful class method `from_species_specification`.  
+`num_unit_cell_octahedra` is the number of lead atoms in each monolayer, in each unit cell. The `InorganicMonolayer` computes some useful properties when given an atoms object representing a monolayer. It also provides the useful class method `from_species_specification`.  
 
 Then construct and `OrganicMolecule` from an `ase` `Atoms` object.
 
