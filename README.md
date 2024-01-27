@@ -38,6 +38,14 @@ samples = pb.generate_homogeneous_perovskite_samples( # homogeneous since just o
 )
 ```
 
-# Dependencies
+## Documentation
 
-We use `aseMolec` for working with `ase.Atoms` objects representing organic molecules. https://github.com/imagdau/aseMolec.
+Key functions are documented through docstrings. 
+
+## Contributing
+
+If you want to contribute to, or use our package for a scientific application, please feel free to contact us via the emails in the citation.
+
+## Dependencies
+
+As well as `ase`, `numpy`, `scipy`, We use `aseMolec` for working with `ase.Atoms` objects representing organic molecules. https://github.com/imagdau/aseMolec.

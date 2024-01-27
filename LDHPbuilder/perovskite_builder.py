@@ -3,7 +3,6 @@ import numpy as np
 from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 from copy import deepcopy
 from ase.atoms import Atoms
-from typing import List
 from scipy.spatial.transform import Rotation as R
 
 from .utils import (
@@ -563,16 +562,16 @@ class PerovskiteBuilder:
 
     def place_molecule(
         self,
-        perovskite_atoms: Atoms,
-        layer: InorganicMonolayer,
-        molecule: List[OrganicMolecule],
-        layer_reference_point: np.ndarray,
-        molecule_reference_point_index: int,
-        molecule_reflections: np.ndarray,
-        molecule_long_vector: np.ndarray,
-        molecule_axial_rotation: float,
-        molecule_axial_rotation_2: float,
-        rot_dir: np.ndarray,
+        perovskite_atoms,
+        layer,
+        molecule,
+        layer_reference_point,
+        molecule_reference_point_index,
+        molecule_reflections,
+        molecule_long_vector,
+        molecule_axial_rotation,
+        molecule_axial_rotation_2,
+        rot_dir,
         rotate_first=True,
     ):
         """ 
