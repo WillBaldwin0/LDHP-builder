@@ -313,6 +313,7 @@ def extract_distinct_mols(perovskite):
 
 
 def extract_all_mols_with_charge(perovskite):
+    
     # only for 2d perovskites
     inorganic_layers = get_inorganic_layers(perovskite)
     inorganic_charge = 0

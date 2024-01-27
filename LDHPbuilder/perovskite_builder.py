@@ -224,7 +224,8 @@ class PerovskiteBuilder:
         num_layers=1,
         max_num_attempts=None,
         max_attempts_per_symmetry=10,
-        stacking_method='total_thickness'
+        stacking_method='total_thickness',
+        layer_spacing=1.5,
     ):
         if max_num_attempts is None:
             max_num_attempts = 10 * num_samples
@@ -256,6 +257,23 @@ class PerovskiteBuilder:
             #).transpose()
             reflections = self.reduced_random_binary_array(num_molecules)
             reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
+            molecule_rotation_direction = self.reduced_random_binary_array(num_molecules)
+
+            # for debug
+            """ molecule_reference_point_indices = np.array([0,0,0,0,0,0,0,0])
+            reflections = np.array([
+                [0,0],
+                [1,0],
+                [1,1],
+                [0,1],
+                [1,1],
+                [0,1],
+                [0,0],
+                [1,0],
+            ])
+            molecule_rotation_direction = np.array([
+                0,1,1,0,0,1,1,0
+            ]) """
             
             # we want to broadly sample the discrete symmetries, but for low symmetries it takes several attempts to 
             # get an acceptable structure
@@ -263,6 +281,12 @@ class PerovskiteBuilder:
                 # 3. rotations
                 molecule_long_vector = random_points_on_cap(45, 1, inorganic_layer.fitted_normal)[0]
                 axial_rotations = np.random.uniform(low=0., high=2*np.pi)
+                axial_rotations_2 = np.random.uniform(low=0., high=2*np.pi)
+
+                # for debug
+                """ molecule_long_vector = np.array([0,0,1])
+                axial_rotations = np.pi/4
+                axial_rotations_2 = np.pi/4 """
 
                 # make layers
                 perovskite_layers = []
@@ -275,6 +299,8 @@ class PerovskiteBuilder:
                         reflections[chunk],
                         molecule_long_vector,
                         axial_rotations,
+                        axial_rotations_2,
+                        molecule_rotation_direction
                     ))
 
                 # stack them
@@ -282,11 +308,13 @@ class PerovskiteBuilder:
                     perovskite_layers,
                     two_d_direction=inorganic_layer.two_d_direction,
                     method=stacking_method,
+                    spacer=layer_spacing,
                 )
-
                 # check intersections
                 if check_molecule_intersection(structure, num_molecules) and check_mol_to_inorganic_intersections(structure):
                     perovskite_structures.append(structure)
+                    ase.io.write('working_samples.xyz', structure, append=True)
+                    print(f"found {len(perovskite_structures)} structures after {num_attempted_orientations} attempts")
                     break
 
             num_attempted_orientations +=1
@@ -333,6 +361,13 @@ class PerovskiteBuilder:
                 layers_objects[i].set_positions(layer.get_positions() + displacement)
                 atoms.extend(layers_objects[i])
             
+            if apply_shear:
+                random_shift = np.random.randn(3) * 5.0
+                random_shift[two_d_direction] = 0.0
+                new_cell = atoms.get_cell()
+                new_cell[two_d_direction] = new_cell[two_d_direction] + random_shift
+                atoms.set_cell(new_cell)
+            
             atoms.center(vacuum=spacer, axis=[two_d_direction])
         elif method == 'half_thickness':
             # get the thickness from the bottom of the inorganic layer
@@ -373,6 +408,7 @@ class PerovskiteBuilder:
         molecule_reflections,
         molecule_long_vector,
         molecule_axial_rotation,
+        molecule_axial_rotation_2
     ):
         """ using the internally stored molecule and inorganic layer, make one perovskite layer. 
         The layer is homogeneous, meaning that all molecules are the same, and the 'long vector' is also shared."""
@@ -401,7 +437,8 @@ class PerovskiteBuilder:
                 mol_bp,
                 reflection,
                 molecule_long_vector,
-                molecule_axial_rotation
+                molecule_axial_rotation,
+                molecule_axial_rotation_2
             )
         
         # place molecules on bottom
@@ -418,7 +455,8 @@ class PerovskiteBuilder:
                 mol_bp,
                 reflection,
                 -1. * molecule_long_vector, # flip the vector
-                molecule_axial_rotation
+                -1. * molecule_axial_rotation,
+                -1. * molecule_axial_rotation_2
             )
 
         return perovskite_obj
@@ -432,6 +470,8 @@ class PerovskiteBuilder:
         molecule_reflections,
         molecule_long_vector,
         molecule_axial_rotation,
+        molecule_axial_rotation_2,
+        molecule_rotation_direction
     ):
         """ using the internally stored molecule and inorganic layer, make one perovskite layer. 
         The layer is homogeneous, meaning that all molecules are the same, and the 'long vector' is also shared."""
@@ -447,10 +487,11 @@ class PerovskiteBuilder:
         perovskite_obj.cell[inorganic_layer.two_d_direction] *= 3.0
 
         # place molecules on top
-        for (layer_bp, mol_bp, reflection) in zip(
+        for (layer_bp, mol_bp, reflection, rot_dir) in zip(
             top_layer_bonding_points, 
             molecule_reference_point_indices, 
-            molecule_reflections
+            molecule_reflections,
+            molecule_rotation_direction
         ):
             self.place_molecule(
                 perovskite_obj,
@@ -460,7 +501,9 @@ class PerovskiteBuilder:
                 mol_bp,
                 reflection,
                 molecule_long_vector,
-                molecule_axial_rotation
+                molecule_axial_rotation,
+                molecule_axial_rotation_2,
+                rot_dir,
             )
 
         return perovskite_obj
@@ -476,6 +519,9 @@ class PerovskiteBuilder:
         molecule_reflections: np.ndarray,
         molecule_long_vector: np.ndarray,
         molecule_axial_rotation: float,
+        molecule_axial_rotation_2: float,
+        rot_dir: np.ndarray,
+        rotate_first=True,
     ):
         """ 
         Given an incomplete perovskite atoms object, an inorganic layer object, a molecule object, 
@@ -492,17 +538,24 @@ class PerovskiteBuilder:
         )
         # get the basis for reflections, and the matrix for the axial rotation
         reflection_basis = molecule.directed_coordinate_system @ mat1
+        rotation_direction = rot_dir * 2 -1
         axial_rotation_matrix = R.from_rotvec(molecule_axial_rotation * reflection_basis[0]).as_matrix()
 
         # apply the axial rotation
         mol_cp = deepcopy(mol)
-        rotate_molecule(mol_cp, axial_rotation_matrix)
+        if rotate_first:
+            rotate_molecule(mol_cp, axial_rotation_matrix)
 
         # apply the reflections
         for i in range(2):
             if molecule_reflections[i]:
-                normal = reflection_basis[i+1]
+                normal = axial_rotation_matrix.T @ reflection_basis[i+1]
                 refect_molecule(mol_cp, normal)
+        
+        # second rotation
+        
+        axial_rotation_matrix = R.from_rotvec(rotation_direction * molecule_axial_rotation_2 * reflection_basis[0]).as_matrix()
+        rotate_molecule(mol_cp, axial_rotation_matrix)
         
         # shift the molecule to the layer bonding point and add to the perovskite
         mol_cp.set_positions(mol_cp.get_positions() + layer_reference_point)
