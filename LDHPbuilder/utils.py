@@ -287,7 +287,7 @@ def reflect_molecule(molecule, normal):
     molecule.set_positions(molecule.get_positions() @ ref_mat)
 
 
-def reduced_random_binary_array(self, n): 
+def reduced_random_binary_array(n): 
     """Generate a random binary array subject to certain symmetry constraints
     
     given N a power of 2, generate a random binary x array of length N

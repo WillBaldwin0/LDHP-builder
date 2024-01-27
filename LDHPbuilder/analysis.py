@@ -1,8 +1,9 @@
 # Will Baldwin January 2023, wjb48@cam.ac.uk
-from aseMolec.anaAtoms import find_molecs, split_molecs
+from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs
 import numpy as np
 from copy import deepcopy
 from ase.neighborlist import neighbor_list
+import ase.neighborlist
 from .utils import *
 
 
@@ -81,7 +82,7 @@ def get_inorganic_layers(perovskite):
         list of the inorganic layers (each layer is an ase.Atoms object)
     """
 
-    inorg_only = strip_atoms(perovskite, organics)
+    inorg_only = strip_atoms(perovskite, ORGANICS)
     find_molecs([inorg_only], CUTOFFS_CONNECTED_INORGANIC)
     wrap_molecs([inorg_only])
     layers = split_molecs([inorg_only])
@@ -96,7 +97,7 @@ def extract_one_inorganic_layer(perovskite):
 
 def extract_one_molecule(perovskite):
     """exacts a single organic molecule from a perovskite """
-    organic_only = strip_atoms(perovskite, inorganics)
+    organic_only = strip_atoms(perovskite, INORGANICS)
     find_molecs([organic_only], CUTOFFS_CONNECTED_ORGANIC)
     wrap_molecs([organic_only])
     mols = split_molecs([organic_only])
@@ -112,7 +113,7 @@ def extract_one_molecule_with_charge(perovskite):
     total_number_of_leads = perovskite.get_chemical_symbols().count('Pb')
     inorganic_charge = -2 * total_number_of_leads
     
-    organic_only = strip_atoms(perovskite, inorganics)
+    organic_only = strip_atoms(perovskite, INORGANICS)
     find_molecs([organic_only], CUTOFFS_CONNECTED_ORGANIC)
     wrap_molecs([organic_only])
     mols = split_molecs([organic_only])
@@ -131,7 +132,7 @@ def extract_distinct_mols(perovskite):
     """
     total_number_of_leads = perovskite.get_chemical_symbols().count('Pb')
     
-    organic_only = strip_atoms(perovskite, inorganics)
+    organic_only = strip_atoms(perovskite, INORGANICS)
     find_molecs([organic_only], CUTOFFS_CONNECTED_ORGANIC)
     wrap_molecs([organic_only])
     mols = split_molecs([organic_only])
@@ -155,13 +156,13 @@ def extract_all_mols_with_charge(perovskite):
     inorganic_charge = 0
     for layer in inorganic_layers:
         inorganic_charge += 2 * layer.get_chemical_symbols().count('Pb')
-        assert len(set(layer.get_chemical_symbols()).intersection(halides)) == 1
+        assert len(set(layer.get_chemical_symbols()).intersection(HALIDES)) == 1
         inorganic_charge -= layer.get_chemical_symbols().count('I')
         inorganic_charge -= layer.get_chemical_symbols().count('Br')
         inorganic_charge -= layer.get_chemical_symbols().count('Cl')
     
     # extract molecules with counts
-    organic_only = strip_atoms(perovskite, inorganics)
+    organic_only = strip_atoms(perovskite, INORGANICS)
     find_molecs([organic_only], CUTOFFS_CONNECTED_ORGANIC)
     wrap_molecs([organic_only])
     mols = split_molecs([organic_only])
@@ -235,7 +236,7 @@ def find_inorganic_layer_normal(monolayer):
 
     # we've enlarged cell, so there are now many layers, so just take one
     layer = layers[0]
-    layer = strip_atoms(layer, halides)
+    layer = strip_atoms(layer, HALIDES)
     lead_positions = layer.get_positions()
 
     # best fit plane

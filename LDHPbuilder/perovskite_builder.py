@@ -1,8 +1,10 @@
 # Will Baldwin January 2023, wjb48@cam.ac.uk
 import numpy as np
 from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
+from copy import deepcopy
 from ase.atoms import Atoms
 from typing import List
+from scipy.spatial.transform import Rotation as R
 
 from .utils import (
     furtherst_heavy_atom_indices,
@@ -11,13 +13,14 @@ from .utils import (
     random_points_on_cap,
     rotate_molecule,
     reflect_molecule,
-    get_2d_pseudocubic_lattice_vectors,
-    find_inorganic_layer_normal,
     check_molecule_intersection,
     check_mol_to_inorganic_intersections,
     reduced_random_binary_array
 )
-
+from .analysis import (
+    get_2d_pseudocubic_lattice_vectors,
+    find_inorganic_layer_normal
+)
 
 class OrganicMolecule:
     """Holds data about organic cations.
@@ -214,7 +217,6 @@ class InorganicMonolayer:
                     [dist*(index_a + index_b), dist*(index_a - index_b), -dist/2**0.5]
                 ]
         monolayer = Atoms(symbols=species, positions=positions, cell=cell, pbc=[True, True, True])
-        ase.io.write('monolayer.xyz', monolayer)
         return cls(monolayer)
 
     def get_bonding_points(self, normal_displacement=3.5):
@@ -326,12 +328,12 @@ class PerovskiteBuilder:
         for i in range(max_num_attempts):
             # The random state is the combination of reflections, bonding points, and rotations
             # 1. molecule bonding points - this is a choice of either end of the molecule, one for each molecule
-            molecule_reference_point_indices = self.reduced_random_binary_array(num_molecules)
+            molecule_reference_point_indices = reduced_random_binary_array(num_molecules)
 
             # 2. reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
-            reflections = self.reduced_random_binary_array(num_molecules)
-            reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
-            molecule_rotation_direction = self.reduced_random_binary_array(num_molecules)
+            reflections = reduced_random_binary_array(num_molecules)
+            reflections = np.vstack((reduced_random_binary_array(num_molecules), reflections)).transpose()
+            molecule_rotation_direction = reduced_random_binary_array(num_molecules)
             
             # we want to broadly sample the discrete symmetries, but for low symmetries it takes several attempts to 
             # get an acceptable structure
@@ -366,7 +368,6 @@ class PerovskiteBuilder:
                 # check intersections
                 if check_molecule_intersection(structure, num_molecules) and check_mol_to_inorganic_intersections(structure):
                     perovskite_structures.append(structure)
-                    ase.io.write('working_samples.xyz', structure, append=True)
                     print(f"found {len(perovskite_structures)} structures after {num_attempted_orientations} attempts")
                     break
 
@@ -562,7 +563,7 @@ class PerovskiteBuilder:
 
     def place_molecule(
         self,
-        perovskite_atoms: ase.Atoms,
+        perovskite_atoms: Atoms,
         layer: InorganicMonolayer,
         molecule: List[OrganicMolecule],
         layer_reference_point: np.ndarray,
