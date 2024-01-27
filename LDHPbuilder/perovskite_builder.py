@@ -1,49 +1,72 @@
-from .molecule_utils import *
 import numpy as np
 from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 from ase.atoms import Atoms
 from typing import List
 
+from .utils import (
+    furtherst_heavy_atom_indices,
+    fix_to_only_nitrogens_with_cutoff,
+    principle_axes_of_molecule,
+    random_points_on_cap,
+    rotate_molecule,
+    reflect_molecule,
+    get_2d_pseudocubic_lattice_vectors,
+    find_inorganic_layer_normal,
+    check_molecule_intersection,
+    check_mol_to_inorganic_intersections,
+    reduced_random_binary_array
+)
+
 
 class OrganicMolecule:
-    """ holds some data about molecules.
-     the origin is shifted to the a 'bonding point'.
-     
-     for now, moleclues have two bonding points, one at each 'end' of the molecule. 
-     These are stored in OrganicMolecule.furtherst_heavy_atoms which holds the two positions. """
-    def __init__(self, ats, charge, smiles=None):
+    """Holds data about organic cations.
+    
+    Organic Cations are manipulated by assigning a local coordinate system,
+    and determining two salient points - 'bonding points' - which are used to
+    attach the cation to the inorganic layer.
+    
+    Attributes
+    ----------
+    charge : int
+        charge of the molecule
+    directed_coordinate_system : np.ndarray
+        3x3 matrix, each row is a unit vector in the local coordinate system. 
+        The first vector points along the long axis of the molecule, from first to second bonding point.
+    
+    Methods
+    -------
+    get_atoms_shifted_rotated(bonding_index, vector, reference_vector, return_rotation_matrix=False)
+        returns the molecule, with bonding atom shifted to the origin, and the molecule long axis aligned along vector
+    """
+    
+    def __init__(self, ats, charge):
+        """Initialize the molecule from an atoms object and a charge"""
         self._atoms = deepcopy(ats)
         self.charge = charge
-        self.smiles = smiles
 
         # find the furtherst sticking out atoms
-        self.furtherst_heavy_atoms, self.long_vector = furtherst_heavy_atom_indices(ats)
-        # we actually only want nitrogens
-        self.bonding_atoms, self.to_flip = fix_to_only_nitrogens_with_cutoff(ats, self.furtherst_heavy_atoms)
-        self.only_bond_to_nitrogens = True
-        if self.to_flip[0] == self.to_flip[1]:
-            self.number_of_bonding_points = 1
-        else:
-            self.number_of_bonding_points = 2
+        furtherst_heavy_atoms, self.long_vector = furtherst_heavy_atom_indices(ats)
 
-        # coorindate axes for rotations
-        #self.coordinate_system = principle_axes_of_molecule(ats)
-        #if np.dot(self.long_vector, self.coordinate_system[0]) < 0.0:
-        #    self.coordinate_system = - self.coordinate_system
-        #self.directed_coordinate_system = self.coordinate_system
+        # we actually only want nitrogens
+        self._bonding_atoms, self._to_flip = fix_to_only_nitrogens_with_cutoff(ats, furtherst_heavy_atoms)
+        self._only_bond_to_nitrogens = True
+        if self._to_flip[0] == self._to_flip[1]:
+            self._number_of_bonding_points = 1
+        else:
+            self._number_of_bonding_points = 2
 
         # coorindate axes for rotations
         principle_axes = principle_axes_of_molecule(ats)
         # construct new basis
         vec1 = np.cross(principle_axes[2], self.long_vector)
         vec2 = np.cross(vec1, self.long_vector)
-        self.coordinate_system = np.asarray([
+        self._coordinate_system = np.asarray([
             -self.long_vector,
             vec1,
             vec2
         ])
-        self.coordinate_system /= np.linalg.norm(self.coordinate_system, axis=1)[:,None]
-        self.directed_coordinate_system = self.coordinate_system
+        self._coordinate_system /= np.linalg.norm(self._coordinate_system, axis=1)[:,None]
+        self.directed_coordinate_system = self._coordinate_system
 
     def get_atoms_shifted_rotated(
         self, 
@@ -52,15 +75,34 @@ class OrganicMolecule:
         reference_vector, 
         return_rotation_matrix=False
     ):
-        """ return the molecule, with bonding atom shifted to the origin, 
-        and the molecule long axis aligned along vector """
+        """Shift and rotate the molecule
+        
+        Parameters
+        ----------
+        bonding_index : int
+            index of the atom to be shifted to the origin
+        vector : np.ndarray
+            vector to align the molecule long axis to
+        reference_vector : np.ndarray
+            Since aligning two vectors is ill-determined, use a reference vector 
+            to uniquely define the rotation.
+        return_rotation_matrix : bool, optional
+            if True, return the rotation matrix, by default False
+        
+        Returns
+        -------
+        ase.Atoms
+            the shifted and rotated molecule
+        np.ndarray
+            the rotation matrix, if return_rotation_matrix is True
+        """
         
         new_ats = deepcopy(self._atoms)
-        new_ats.set_positions(new_ats.get_positions() - new_ats.get_positions()[self.bonding_atoms[bonding_index]])
-        if self.to_flip[bonding_index]:
-            directed_coordinate_system = - self.coordinate_system
+        new_ats.set_positions(new_ats.get_positions() - new_ats.get_positions()[self._bonding_atoms[bonding_index]])
+        if self._to_flip[bonding_index]:
+            directed_coordinate_system = - self._coordinate_system
         else:
-            directed_coordinate_system = self.coordinate_system
+            directed_coordinate_system = self._coordinate_system
 
         intermediate_1 = np.cross(vector, reference_vector)
         target_coordinate_system = np.asarray([
@@ -69,8 +111,6 @@ class OrganicMolecule:
             np.cross(vector, intermediate_1)
         ])
         target_coordinate_system /= np.linalg.norm(target_coordinate_system, axis=1)[:,None]
-        #txx = R.align_vectors(target_coordinate_system, directed_coordinate_system)
-        #print("matrix = ", txx[0].as_matrix())
         mat = directed_coordinate_system.transpose() @ target_coordinate_system
         rotate_molecule(new_ats, mat)
         if return_rotation_matrix:
@@ -86,21 +126,29 @@ class OrganicMolecule:
     def __repr__(self):
         string = f"OrganicMolecule: {self._atoms.get_chemical_formula()}"
         string += f"\n charge: {self.charge}"
-        string += f"\n only_bond_to_nitrogens = {self.only_bond_to_nitrogens}"
-        string += f"\n number_of_bonding_sites = {self.number_of_bonding_points}"
-        string += f"\n given (not calculated) smiles = {self.smiles}"
+        string += f"\n only_bond_to_nitrogens = {self._only_bond_to_nitrogens}"
+        string += f"\n number_of_bonding_sites = {self._number_of_bonding_points}"
         return string
 
 
 class InorganicMonolayer:
-    """ holds some extra data about monolayers.
-    importantly, stores:
-    - the normal vector of the layer
-    - the index of the non-periodic direction of the cell matrix
-     """
+    """Holds data about monolayers.
+
+    This class is currently restricted to **corner sharing** monolayers.
+    
+    Attributes
+    ----------
+    atoms : ase.Atoms
+        the monolayer
+    fitted_normal : np.ndarray
+        the normal vector to the monolayer
+    two_d_direction : int
+        the index of the cell vector which is the 2d direction of the monolayer
+    ps_lattice_constants : np.ndarray
+        the pseudocubic lattice constants of the monolayer    
+    """
     def __init__(self, monolayer_ats):
-        # we want a monolayer, we will at least check for a layer.
-        self.check_input(monolayer_ats)
+        """Initialize the monolayer from an atoms object"""
 
         self.atoms = deepcopy(monolayer_ats)
         self.fitted_normal, self.two_d_direction = find_inorganic_layer_normal(
@@ -110,12 +158,6 @@ class InorganicMonolayer:
             get_2d_pseudocubic_lattice_vectors(monolayer_ats, self.two_d_direction, self.fitted_normal)
         )
         new_lc2 = np.cross(self.fitted_normal, self.ps_lattice_constants[0])
-        local_basis = np.asarray([
-            np.cross(self.fitted_normal, new_lc2), 
-            new_lc2,
-            self.fitted_normal
-        ])
-        self.local_basis = local_basis / np.linalg.norm(local_basis, axis=1)[:,None]
         syms = np.asarray(monolayer_ats.get_chemical_symbols())
         self.lead_positions = monolayer_ats.get_positions()[syms == 'Pb']
         self.atoms.cell[self.two_d_direction] *= 3.0
@@ -123,6 +165,22 @@ class InorganicMonolayer:
 
     @classmethod
     def from_species_specification(cls, B_site, X_site, num_unit_cell_octahedra):
+        """create the monolayer object from a specification of the species
+
+        For now, only Pb halide monolayers are supported. The size of the unit cell is 
+        specified by the number of octahedra, which for now must be 1, 2, or 4. This is used to
+        create the natural cubic or orthorhombic unit cell.
+        
+        Parameters
+        ----------
+        B_site : str
+            the B site species
+        X_site : str
+            the X site species
+        num_unit_cell_octahedra : int
+            the number of octahedra in the unit cell
+        """
+
         assert B_site == 'Pb'
         assert num_unit_cell_octahedra in [1,2,4] # for now...
         typical_distances = {
@@ -158,11 +216,13 @@ class InorganicMonolayer:
         ase.io.write('monolayer.xyz', monolayer)
         return cls(monolayer)
 
-
     def get_bonding_points(self, normal_displacement=3.5):
-        """ returns the coordinates of the points in between the octahedra, displaced by 
-        normal_displacement relative to the centerline of the monolayer.
-        north and south refer to the two sides of the layer. """
+        """Returns the coordinates of the points in between salient halides. 
+        
+        The returned points are displaced by normal_displacement 
+        relative to the centerline of the monolayer. north and south refer to 
+        the two sides of the layer. """
+
         bonding_points_north = []
         bonding_points_south = []
         ps1 = self.ps_lattice_constants[0]
@@ -173,10 +233,6 @@ class InorganicMonolayer:
             bonding_points_south.append(self.lead_positions[i] - self.fitted_normal * normal_displacement + 0.5*(ps1+ps2))
 
         return bonding_points_north, bonding_points_south
-    
-    def check_input(self, ats_in):
-        if not(isinstance(ats_in, ase.atoms.Atoms)):
-            raise ValueError('monolayer input must be atoms object')
         
     def __repr__(self):
         string = "InorganicMonolayer: "
@@ -186,35 +242,31 @@ class InorganicMonolayer:
 
 
 class PerovskiteBuilder:
-    """ class for assembling perovskites from molecules and inorganic layers.
-    implementation is currently a collection of ad-hock rules, but gives decent results.
-     
-    the fundamental way in which perovskites are built involves first placing molecules at given sites, 
-    - choosing which part of the molecule goes into the site
-    - choosing whether to apply reflections to the molecule
-     """
+    """Class for assembling perovskites from molecules and inorganic layers.
+
+    The implementation is based on the following assumptions:
+        - the inorganic layer is a corner sharing monolayer
+        - the B site is Pb
+        - the molecules 'bond' to the inorganic layer in a specific way. 
+        wherein a saleint point on the molecule sits between four octahrdea in the inorganic layer.
+    
+    Currently, methods for generating perovskites with just one type of 
+    organic cation are implemented. The user can specify an inorganic monolayer,
+    a cation, and the number of layers in the unit cell. The size of the unit 
+    cell in the in-plane directions is dictated by the number of octahedra in
+    the monolayer.
+
+    For each 'bonding point' on the inorganic layer, one molecule is placed.
+
+    The freedom in the generation is:
+        - which end of the molecule to bond to the inorganic layer
+        - whether to reflect the molecule in the in-plane directions
+        - the angle of the 'longest vector' of the molecule relative to the inorganic layer normal
+        - an additional rotation angle of the molecule about the 'longest vector'
+    """
+
     def __init__(self):
         pass
-
-    def __repr__(self):
-        string = "PerovskiteBuilder:"
-        string += f"\n inorganic: {self.layer.atoms.get_chemical_formula()}"
-        string += f"\n organic: {self.molecule._atoms.get_chemical_formula()}"
-        return string
-    
-    def reduced_random_binary_array(self, n): 
-        """ returns a random binary array subject to some symmetry constraints """
-        # n must be a power of 2
-        assert ((n & (n-1) == 0) and n != 0) # funky
-
-        exp = int(np.log2(n))
-        stuff = [np.random.choice([True,False])]
-        for i in range(exp):
-            stuff += stuff
-            if np.random.choice([0,1]):
-                stuff[2**i:] = list(np.logical_not(stuff[2**i:]))
-        return np.asarray(stuff)
-
 
     def generate_homogeneous_perovskite_samples(
         self,
@@ -227,6 +279,31 @@ class PerovskiteBuilder:
         stacking_method='total_thickness',
         layer_spacing=1.5,
     ):
+        """Generate a number of perovskite samples with the same organic molecule.
+
+        Parameters
+        ----------
+        inorganic_layer : InorganicMonolayer
+            the inorganic layer
+        organic_molecule : OrganicMolecule
+            the organic molecule
+        num_samples : int, optional
+            the number of samples to generate, by default 1
+        num_layers : int, optional
+            the number of layers in the unit cell, by default 1
+        max_num_attempts : int, optional
+            the maximum number of attempts to generate a sample, by default None    
+        max_attempts_per_symmetry : int, optional
+            the maximum number of attempts to generate a sample with a given symmetry, by default 10. 
+            The symmetry is specified by the discrete vectors determining molecule reflections. to achieve
+            even coverage of the discrete symmetries, try several times for each discrete symmetry by
+            generating new rotations.
+        stacking_method : str, optional
+            how to stack the layers, by default 'total_thickness'. 
+        layer_spacing : float, optional
+            the spacing between layers, by default 1.5
+        """
+
         if max_num_attempts is None:
             max_num_attempts = 10 * num_samples
 
@@ -241,7 +318,7 @@ class PerovskiteBuilder:
         elif organic_molecule.charge == 2:
             f = self.generate_homogeneous_layer_charge_2
         else:
-            raise ValueError('wtf is this molecule')
+            raise ValueError('only +1 or +2 cations are supported')
 
         perovskite_structures = []
         num_attempted_orientations = 0
@@ -251,29 +328,9 @@ class PerovskiteBuilder:
             molecule_reference_point_indices = self.reduced_random_binary_array(num_molecules)
 
             # 2. reflections are in the two in plane directions. desrcibed by [n,m]. n=0,1. [1,1] means reflect in both
-            #reflections = np.vstack((
-            #    self.reduced_random_binary_array(num_molecules), 
-            #    self.reduced_random_binary_array(num_molecules))
-            #).transpose()
             reflections = self.reduced_random_binary_array(num_molecules)
             reflections = np.vstack((self.reduced_random_binary_array(num_molecules), reflections)).transpose()
             molecule_rotation_direction = self.reduced_random_binary_array(num_molecules)
-
-            # for debug
-            """ molecule_reference_point_indices = np.array([0,0,0,0,0,0,0,0])
-            reflections = np.array([
-                [0,0],
-                [1,0],
-                [1,1],
-                [0,1],
-                [1,1],
-                [0,1],
-                [0,0],
-                [1,0],
-            ])
-            molecule_rotation_direction = np.array([
-                0,1,1,0,0,1,1,0
-            ]) """
             
             # we want to broadly sample the discrete symmetries, but for low symmetries it takes several attempts to 
             # get an acceptable structure
@@ -282,11 +339,6 @@ class PerovskiteBuilder:
                 molecule_long_vector = random_points_on_cap(45, 1, inorganic_layer.fitted_normal)[0]
                 axial_rotations = np.random.uniform(low=0., high=2*np.pi)
                 axial_rotations_2 = np.random.uniform(low=0., high=2*np.pi)
-
-                # for debug
-                """ molecule_long_vector = np.array([0,0,1])
-                axial_rotations = np.pi/4
-                axial_rotations_2 = np.pi/4 """
 
                 # make layers
                 perovskite_layers = []
@@ -461,7 +513,6 @@ class PerovskiteBuilder:
 
         return perovskite_obj
 
-
     def generate_homogeneous_layer_charge_2(
         self, 
         inorganic_layer,
@@ -508,7 +559,6 @@ class PerovskiteBuilder:
 
         return perovskite_obj
 
-
     def place_molecule(
         self,
         perovskite_atoms: ase.Atoms,
@@ -550,7 +600,7 @@ class PerovskiteBuilder:
         for i in range(2):
             if molecule_reflections[i]:
                 normal = axial_rotation_matrix.T @ reflection_basis[i+1]
-                refect_molecule(mol_cp, normal)
+                reflect_molecule(mol_cp, normal)
         
         # second rotation
         
@@ -561,7 +611,6 @@ class PerovskiteBuilder:
         mol_cp.set_positions(mol_cp.get_positions() + layer_reference_point)
         perovskite_atoms.extend(mol_cp)
     
-
     def _attempt_to_squash(self, perovskite_guess):
         pg = deepcopy(perovskite_guess) * (2,2,2)
 

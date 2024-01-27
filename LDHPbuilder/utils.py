@@ -284,3 +284,39 @@ def reflect_molecule(molecule, normal):
     ref_mat = np.eye(3)
     ref_mat -= 2* np.outer(nnormal, nnormal)
     molecule.set_positions(molecule.get_positions() @ ref_mat)
+
+
+def reduced_random_binary_array(self, n): 
+    """Generate a random binary array subject to certain symmetry constraints
+    
+    given N a power of 2, generate a random binary x array of length N
+    subject to
+        x[2^n:2^(n+1)] \in { x[0:2^n], not x[0:2^n] }
+
+    Exmaples:
+        [1,0,1,0] or [0,1,1,0],
+        [1,0,0,1,1,0,0,1] or [0,1,0,1,0,1,0,1]
+    non-examples:
+        [1,0,1,1]
+
+    Parameters
+    ----------
+    n : int
+        length of the array
+    
+    Returns
+    -------
+    np.array
+        random binary array
+    """
+
+    # n must be a power of 2
+    assert ((n & (n-1) == 0) and n != 0)
+
+    exp = int(np.log2(n))
+    stuff = [np.random.choice([True,False])]
+    for i in range(exp):
+        stuff += stuff
+        if np.random.choice([0,1]):
+            stuff[2**i:] = list(np.logical_not(stuff[2**i:]))
+    return np.asarray(stuff)
