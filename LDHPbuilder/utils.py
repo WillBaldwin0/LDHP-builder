@@ -1,3 +1,4 @@
+# Will Baldwin January 2023, wjb48@cam.ac.uk
 from aseMolec.anaAtoms import find_molecs, split_molecs
 import numpy as np
 from copy import deepcopy

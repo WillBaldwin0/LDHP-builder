@@ -1,3 +1,4 @@
+# Will Baldwin January 2023, wjb48@cam.ac.uk
 import numpy as np
 from aseMolec.anaAtoms import find_molecs, split_molecs, wrap_molecs, scan_vol
 from ase.atoms import Atoms
