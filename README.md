@@ -1,6 +1,6 @@
 # LDHP-builder
 
-This package provides tools for randomly generating low dimensional hybrid organic inorganic perovskites. 
+This package provides tools for randomly generating low dimensional hybrid organic inorganic perovskites. See out preprint for example usage https://arxiv.org/abs/2403.06955
 
 ## Usage
 
@@ -42,9 +42,11 @@ samples = pb.generate_homogeneous_perovskite_samples( # homogeneous since just o
 
 Key functions are documented through docstrings. 
 
-## Contributing
+## Contributing and Feature Requests
 
 If you want to contribute to, or use our package for a scientific application, please feel free to contact us via the emails in the citation.
+
+There are many extensions which could be easily added, please let us know via an issue.
 
 ## Dependencies
 
