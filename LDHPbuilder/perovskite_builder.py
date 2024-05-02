@@ -572,7 +572,7 @@ class PerovskiteBuilder:
         molecule_long_vector,
         molecule_axial_rotation,
         molecule_axial_rotation_2,
-        rot_dir,
+        rot_dir=1.,
         rotate_first=True,
     ):
         """ 
