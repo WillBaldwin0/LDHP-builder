@@ -461,7 +461,8 @@ class PerovskiteBuilder:
         molecule_reflections,
         molecule_long_vector,
         molecule_axial_rotation,
-        molecule_axial_rotation_2
+        molecule_axial_rotation_2,
+        molecule_rotation_direction
     ):
         """ using the internally stored molecule and inorganic layer, make one perovskite layer. 
         The layer is homogeneous, meaning that all molecules are the same, and the 'long vector' is also shared."""
