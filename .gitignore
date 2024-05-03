@@ -1,3 +1,6 @@
 __pycache__/
 LDHPbuilder.egg-info/
 build/
+tutorials/relaxation_1.traj
+tutorials/relaxation_2.traj
+tutorials/full_relaxation_traj.xyz
