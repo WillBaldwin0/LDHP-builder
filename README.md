@@ -1,6 +1,6 @@
 # LDHP-builder
 
-This package provides tools for randomly generating low dimensional hybrid organic inorganic perovskites. See out preprint for example usage https://arxiv.org/abs/2403.06955
+This package provides tools for randomly generating low dimensional hybrid organic inorganic perovskites, as used in https://pubs.acs.org/doi/10.1021/jacs.4c06549.
 
 ## Usage
 
@@ -41,6 +41,25 @@ samples = pb.generate_homogeneous_perovskite_samples( # homogeneous since just o
 ## Documentation
 
 Key functions are documented through docstrings. 
+
+## Citing
+
+This code was introduced in the following paper:
+
+```bibtext
+@article{KarimitariBaldwin2024,
+    author = {Karimitari, Nima and Baldwin, William J. and Muller, Evan W. and Bare, Zachary J. L. and Kennedy, W. Joshua and Csányi, Gábor and Sutton, Christopher},
+    title = {Accurate Crystal Structure Prediction of New 2D Hybrid Organic–Inorganic Perovskites},
+    journal = {Journal of the American Chemical Society},
+    volume = {146},
+    number = {40},
+    pages = {27392-27404},
+    year = {2024},
+    doi = {10.1021/jacs.4c06549},
+    note ={PMID: 39344597},
+    URL = {https://doi.org/10.1021/jacs.4c06549}
+}
+```
 
 ## Contributing and Feature Requests
 
